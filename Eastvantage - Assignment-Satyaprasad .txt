@@ -1,0 +1,95 @@
+
+import sqlite3
+import pandas as pd
+
+# ----------------------------
+# CONFIGURATION
+# ----------------------------
+DB_PATH = "sales.db"  # Replace with your SQLite database file
+OUTPUT_CSV_SQL = "output_sql.csv"
+OUTPUT_CSV_PANDAS = "output_pandas.csv"
+
+# ----------------------------
+# SQL-ONLY SOLUTION
+# ----------------------------
+def sql_solution():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    query = """
+        SELECT 
+            c.CustomerID AS Customer,
+            c.Age,
+            i.ItemName AS Item,
+            CAST(SUM(COALESCE(s.Quantity, 0)) AS INTEGER) AS Quantity
+        FROM Sales s
+        JOIN Customers c ON s.CustomerID = c.CustomerID
+        JOIN Items i ON s.ItemID = i.ItemID
+        WHERE c.Age BETWEEN 18 AND 35
+        GROUP BY c.CustomerID, c.Age, i.ItemName
+        HAVING Quantity > 0
+        ORDER BY c.CustomerID, i.ItemName;
+    """
+
+    df_sql = pd.read_sql_query(query, conn)
+    df_sql.to_csv(OUTPUT_CSV_SQL, sep=';', index=False)
+    print(f"✅ SQL output written to {OUTPUT_CSV_SQL}")
+
+    conn.close()
+    return df_sql
+
+# ----------------------------
+# PANDAS-BASED SOLUTION
+# ----------------------------
+def pandas_solution():
+    conn = sqlite3.connect(DB_PATH)
+
+    customers = pd.read_sql_query("SELECT * FROM Customers", conn)
+    sales = pd.read_sql_query("SELECT * FROM Sales", conn)
+    items = pd.read_sql_query("SELECT * FROM Items", conn)
+
+    conn.close()
+
+    # Merge dataframes
+    df = sales.merge(customers, on="CustomerID", how="inner") \
+              .merge(items, on="ItemID", how="inner")
+
+    # Filter age 18-35 and replace NULL quantities with 0
+    df = df[(df["Age"] >= 18) & (df["Age"] <= 35)]
+    df["Quantity"] = df["Quantity"].fillna(0).astype(int)
+
+    # Group and sum
+    df_grouped = (
+        df.groupby(["CustomerID", "Age", "ItemName"], as_index=False)
+        .agg({"Quantity": "sum"})
+    )
+
+    # Remove zero quantity
+    df_grouped = df_grouped[df_grouped["Quantity"] > 0]
+
+    # Rename columns to match expected output
+    df_grouped.rename(
+        columns={
+            "CustomerID": "Customer",
+            "ItemName": "Item"
+        },
+        inplace=True
+    )
+
+    # Save output
+    df_grouped.to_csv(OUTPUT_CSV_PANDAS, sep=';', index=False)
+    print(f"✅ Pandas output written to {OUTPUT_CSV_PANDAS}")
+
+    return df_grouped
+
+# ----------------------------
+# MAIN EXECUTION
+# ----------------------------
+if _name_ == "_main_":
+    print("Running SQL-based solution...")
+    sql_result = sql_solution()
+    print(sql_result)
+
+    print("\nRunning Pandas-based solution...")
+    pandas_result = pandas_solution()
+    print(pandas_result)
